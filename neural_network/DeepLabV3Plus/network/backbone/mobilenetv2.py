@@ -1,5 +1,6 @@
 from torch import nn
-from torchvision.models.utils import load_state_dict_from_url
+# from torchvision.models.utils import load_state_dict_from_url
+from torch.hub import load_state_dict_from_url
 import torch.nn.functional as F
 
 __all__ = ['MobileNetV2', 'mobilenet_v2']
@@ -150,7 +151,7 @@ class MobileNetV2(nn.Module):
             nn.Linear(self.last_channel, num_classes),
         )
 
-        # weight initialization
+        # weights initialization
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out')

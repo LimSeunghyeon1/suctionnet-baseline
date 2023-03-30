@@ -9,8 +9,10 @@ from suctionnet.suctionnet_dataset import SuctionNetDataset
 import ConvNet
 import DeepLabV3Plus.network as network
 from utils.avgmeter import AverageMeter
-
-
+import time
+import gc
+gc.collect()
+torch.cuda.empty_cache()
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', default='deeplabv3plus_resnet101', help='Model file name [default: votenet]')
 parser.add_argument('--checkpoint_path', default=None, help='Model checkpoint path [default: None]')
@@ -23,13 +25,14 @@ parser.add_argument('--label_root', default='/ssd1/hanwen/grasping/graspnet_labe
 parser.add_argument('--max_epoch', type=int, default=100, help='Epoch to run [default: 180]')
 parser.add_argument('--batch_size', type=int, default=24, help='Batch Size during training [default: 8]')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='Initial learning rate [default: 0.001]')
-parser.add_argument('--weight_decay', type=float, default=0.0005, help='Optimization L2 weight decay [default: 0]')
+parser.add_argument('--weight_decay', type=float, default=0.0005, help='Optimization L2 weights decay [default: 0]')
 parser.add_argument('--bn_decay_step', type=int, default=10, help='Period of BN decay (in epochs) [default: 20]')
 parser.add_argument('--bn_decay_rate', type=float, default=0.5, help='Decay rate for BN decay [default: 0.5]')
 parser.add_argument('--lr_decay_steps', default='20,40,60', help='When to decay the learning rate (in epochs) [default: 80,120,160]')
 parser.add_argument('--lr_decay_rates', default='0.7,0.7,0.7', help='Decay rates for lr decay [default: 0.1,0.1,0.1]')
 parser.add_argument('--overwrite', action='store_true', help='Overwrite existing log and dump folders.')
 parser.add_argument('--finetune', action='store_true', help='finetune backbone network.')
+
 FLAGS = parser.parse_args()
 
 
@@ -75,10 +78,10 @@ def my_worker_init_fn(worker_id):
 
 
 TRAIN_DATASET = SuctionNetDataset(DATA_ROOT, LABEL_ROOT, camera=CAMERA, split='train', input_size=(480, 480))
-
+# train_sampler = DistributedSampler(TRAIN_DATASET)
 print(len(TRAIN_DATASET))
 TRAIN_DATALOADER = DataLoader(TRAIN_DATASET, batch_size=BATCH_SIZE, shuffle=True,
-    num_workers=4, drop_last=True, worker_init_fn=my_worker_init_fn)
+    drop_last=True, worker_init_fn=my_worker_init_fn)
 print(len(TRAIN_DATALOADER))
 
 # MODEL = importlib.import_module(FLAGS.model)
@@ -93,7 +96,7 @@ model_map = {
         'convnet_resnet101': ConvNet.convnet_resnet101,
         'deeplabv3plus_resnet101_depth': network.deeplabv3plus_resnet101_depth
     }
-net = model_map[FLAGS.model](num_classes=FLAGS.num_classes, output_stride=FLAGS.output_stride, pretrained_backbone=True)
+net = model_map[FLAGS.model](num_classes=FLAGS.num_classes, output_stride=FLAGS.output_stride, pretrained_backbone=False)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 if torch.cuda.device_count() > 1:
     print("Let's use", torch.cuda.device_count(), "GPUs!")
@@ -156,11 +159,13 @@ def train_one_epoch():
     center_losses = AverageMeter()
 
     adjust_learning_rate(optimizer, EPOCH_CNT)
-    
     net.train()
+    start_time = time.time()
     for batch_idx, (rgbs, depths, scores, wrenches, _) in enumerate(TRAIN_DATALOADER):
+
         optimizer.zero_grad()
         depths = torch.clamp(depths, 0, 1)
+
         if FLAGS.model == 'convnet_resnet101':
             depths = depths.unsqueeze(-1).repeat([1, 1, 1, 3])
             rgbds = torch.cat([rgbs, depths], dim=-1)
@@ -168,25 +173,29 @@ def train_one_epoch():
             rgbds = depths.unsqueeze(-1)
         else:
             rgbds = torch.cat([rgbs, depths.unsqueeze(-1)], dim=-1)
-        
+
         rgbds = rgbds.permute(0, 3, 1, 2)
         rgbds = rgbds.to(device)
         scores = scores.to(device)
         wrenches = wrenches.to(device)
-        
+
         pred = net(rgbds)
-        
+
         score_loss = criterion(pred[:, 0, ...], scores)
+
         wrench_loss = criterion(pred[:, 1, ...], wrenches)
         loss = score_loss + wrench_loss
-
+        torch.cuda.synchronize()
+        t2 = time.time()
         loss.backward()
+        torch.cuda.synchronize()
+        t3 = time.time()
+        # print("Real time for loss computation", t3 - t2)
         optimizer.step()
-
         losses.update(loss.item(), rgbs.size(0))
         score_losses.update(score_loss.item(), rgbs.size(0))
         center_losses.update(wrench_loss.item(), rgbs.size(0))
-        
+
         if (batch_idx+1) % 10 == 0:
             log_string('Lr: {lr:.3e} | '
                         'Epoch: [{0}][{1}/{2}] | '
@@ -195,7 +204,8 @@ def train_one_epoch():
                         'Total Loss: {loss.val:.4f} ({loss.avg:.4f})'.format(
                         EPOCH_CNT, batch_idx+1, len(TRAIN_DATALOADER), lr=get_current_lr(EPOCH_CNT),
                         score_loss=score_losses, center_loss=center_losses, loss=losses))
-    
+            print("TIME ELAPSED : ", time.time() - start_time)
+            start_time = time.time()
 
 
 def train():

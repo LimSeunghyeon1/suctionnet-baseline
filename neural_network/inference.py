@@ -194,16 +194,15 @@ def drawGaussian(img, pt, score, sigma=1):
 
 def get_suction_from_heatmap(depth_img, heatmap, camera_info):
     suction_scores, idx0, idx1 = grid_sample(heatmap, down_rate=10, topk=1024)
-
     if len(depth_img.shape) == 3:
         depth_img = depth_img[..., 0]
     point_cloud = create_point_cloud_from_depth_image(depth_img, camera_info)
     
     suction_points = point_cloud[idx0, idx1, :]
-
     tic_sub = time.time()
-    
+
     point_cloud = point_cloud.reshape(-1, 3)
+
     pc_o3d = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(point_cloud))
     pc_voxel_sampled = pc_o3d.voxel_down_sample(0.003)
     points_sampled = np.array(pc_voxel_sampled.points).astype(np.float32)
@@ -223,7 +222,9 @@ def get_suction_from_heatmap(depth_img, heatmap, camera_info):
     return suction_arr, idx0, idx1
 
 def inference_one_view(rgb_file, depth_file, meta_file, scene_idx, anno_idx):
-    
+    k_size = 15
+    kernel = uniform_kernel(k_size)
+    kernel = torch.from_numpy(kernel).unsqueeze(0).unsqueeze(0).cuda()
     meta = scio.loadmat(meta_file)
     intrinsics = meta['intrinsic_matrix']
     fx, fy = intrinsics[0,0], intrinsics[1,1]
@@ -256,23 +257,29 @@ def inference_one_view(rgb_file, depth_file, meta_file, scene_idx, anno_idx):
     pred = pred.clamp(0, 1)
     toc = time.time()
     print('inference time:', toc - tic)
+    start = time.time()
+    # torch.cuda.synchronize()
+    # start = time.time()
+    heatmap = (pred[0, 0] * pred[0, 1]).unsqueeze(0).unsqueeze(0)
+    # print("heatmap time", time.time() - start)
+    print("HEATMAP BEFORE CONVOLUTION", heatmap.shape, "kernel size", kernel.shape)
+    # print(heatmap)
+    start = time.time()
 
-    heatmap = (pred[0, 0] * pred[0, 1]).cpu().unsqueeze(0).unsqueeze(0)
-    
-    k_size = 15
-    kernel = uniform_kernel(k_size)
-    kernel = torch.from_numpy(kernel).unsqueeze(0).unsqueeze(0)
-    heatmap = F.conv2d(heatmap, kernel, padding=(kernel.shape[2] // 2, kernel.shape[3] // 2)).squeeze().numpy()
-
+    heatmap = F.conv2d(heatmap, kernel, padding=(kernel.shape[2] // 2, kernel.shape[3] // 2)).squeeze().cpu().numpy()
+    # print("cpu time", time.time() - start)
+    # print("HEATMAP AFTER CONVOLUTION",heatmap.shape)
+    # print(heatmap)
+    # heatmap = F.conv2d(heatmap, kernel, padding=(kernel.shape[2] // 2, kernel.shape[3] // 2)).squeeze()
     suctions, idx0, idx1 = get_suction_from_heatmap(depth.numpy(), heatmap, camera_info)
-    
     save_dir = os.path.join(SAVE_PATH, split, 'scene_%04d'%scene_idx, camera, 'suction')
     os.makedirs(save_dir, exist_ok=True)
     suction_numpy_file = os.path.join(save_dir, '%04d.npz'%anno_idx)
     print('Saving:', suction_numpy_file)
+
     np.savez(suction_numpy_file, suctions)
 
-    if anno_idx < 3 and FLAGS.save_visu:
+    if FLAGS.save_visu:
         rgb_img = rgbd[0].permute(1, 2, 0)[..., :3].cpu().numpy()
         rgb_img *= 255
         
