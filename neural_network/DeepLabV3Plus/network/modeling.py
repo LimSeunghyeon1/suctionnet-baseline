@@ -155,6 +155,7 @@ def _load_model(arch_type, backbone, num_classes, output_stride, pretrained_back
         model = _segm_resnetRGBD(arch_type, backbone, num_classes, output_stride=output_stride, pretrained_backbone=pretrained_backbone)
     else:
         raise NotImplementedError
+    print("Model loaded... backbone is ", backbone)
     return model
 
 def _load_mymodel(arch_type, backbone, num_classes, output_stride, pretrained_backbone):
@@ -218,7 +219,7 @@ def deeplabv3plus_resnet50_2tower(num_classes=21, output_stride=8, pretrained_ba
     return _load_mymodel('deeplabv3plus', 'resnet50', num_classes, output_stride=output_stride, pretrained_backbone=pretrained_backbone)
 
 
-def deeplabv3plus_resnet101(num_classes=21, output_stride=8, pretrained_backbone=True):
+def deeplabv3plus_resnet101(num_classes=21, output_stride=8, pretrained_backbone=False):
     """Constructs a DeepLabV3+ model with a ResNet-101 backbone.
 
     Args:
@@ -226,6 +227,7 @@ def deeplabv3plus_resnet101(num_classes=21, output_stride=8, pretrained_backbone
         output_stride (int): output stride for deeplab.
         pretrained_backbone (bool): If True, use the pretrained backbone.
     """
+    print("pretrained : ", pretrained_backbone)
     return _load_model('deeplabv3plus', 'resnet101', num_classes, output_stride=output_stride, pretrained_backbone=pretrained_backbone)
 
 def deeplabv3plus_resnet101_depth(num_classes=21, output_stride=8, pretrained_backbone=True):

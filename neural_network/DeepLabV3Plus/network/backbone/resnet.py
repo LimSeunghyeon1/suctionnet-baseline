@@ -1,7 +1,12 @@
 import torch
 import torch.nn as nn
+<<<<<<< HEAD
 from torch.hub import load_state_dict_from_url
 # from torch.hub import load_state_dict_from_url
+=======
+# from torchvision.models.utils import load_state_dict_from_url
+from torch.hub import load_state_dict_from_url
+>>>>>>> a7c428d4b799f16a049337618816e43ede1ff24f
 
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
@@ -225,7 +230,7 @@ def _resnetRGBD(arch, block, layers, pretrained, progress, **kwargs):
         for key in model_keys:
             if key in state_keys:
                 # print(key)
-                if key == 'conv1.weight':
+                if key == 'conv1.weights':
                     continue
                 model_dict[key] = state_dict[key]
         model.load_state_dict(model_dict, strict=True)
@@ -341,7 +346,7 @@ def _resnet(arch, block, layers, pretrained, progress, **kwargs):
         for key in model_keys:
             if key in state_keys:
                 # print(key)
-                # if key == 'conv1.weight':
+                # if key == 'conv1.weights':
                 #     continue
                 model_dict[key] = state_dict[key]
         model.load_state_dict(model_dict, strict=True)

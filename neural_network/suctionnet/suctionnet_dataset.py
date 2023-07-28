@@ -7,7 +7,8 @@ from PIL import Image
 import scipy.io as scio
 import random
 import torch
-from torch._six import container_abcs
+# from torch._six import container_abcs
+import collections.abc as container_abcs
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from utils.image import get_affine_transform, gaussian_radius, draw_msra_gaussian
