@@ -22,7 +22,7 @@ parser.add_argument('--split', default='test_seen', help='dataset split [default
 parser.add_argument('--camera', default='kinect', help='camera to use [default: kinect]')
 parser.add_argument('--dataset_root', default='/DATA2/Benchmark/graspnet', help='where dataset is')
 parser.add_argument('--save_dir', default='/DATA2/Benchmark/suction/inference_results/deeplabV3plus', help='Dump dir to save model checkpoint [default: log]')
-parser.add_argument('--checkpoint_path', default='checkpoints/checkpoint_30', help='Model checkpoint path [default: None]')
+parser.add_argument('--checkpoint_path', default='/home/tidy/ur5_sh/ur5_experiment/suctionnet-baseline/realsense-deeplabplus-RGBD', help='Model checkpoint path [default: None]')
 parser.add_argument('--overwrite', action='store_true', help='Overwrite existing log and dump folders.')
 parser.add_argument('--save_visu', action='store_true', help='whether to save visualizations.')
 FLAGS = parser.parse_args()
@@ -63,31 +63,9 @@ def my_worker_init_fn(worker_id):
     pass
 
 
-model_map = {
-        'deeplabv3_resnet50': network.deeplabv3_resnet50,
-        'deeplabv3plus_resnet50': network.deeplabv3plus_resnet50,
-        'deeplabv3_resnet101': network.deeplabv3_resnet101,
-        'deeplabv3plus_resnet101': network.deeplabv3plus_resnet101,
-        'deeplabv3_mobilenet': network.deeplabv3_mobilenet,
-        'deeplabv3plus_mobilenet': network.deeplabv3plus_mobilenet,
-        'convnet_resnet101': ConvNet.convnet_resnet101,
-        'deeplabv3plus_resnet101_depth': network.deeplabv3plus_resnet101_depth
-    }
-net = model_map[FLAGS.model](num_classes=FLAGS.num_classes, output_stride=FLAGS.output_stride)
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-net = nn.DataParallel(net)
-net.to(device)
    
 
-EPOCH_CNT = 0
-if CHECKPOINT_PATH is not None and os.path.isfile(CHECKPOINT_PATH):
-    print('Loading model from:')
-    print(CHECKPOINT_PATH)
-    checkpoint = torch.load(CHECKPOINT_PATH)
-    
-    net.load_state_dict(checkpoint['model_state_dict'])
 
-    EPOCH_CNT = checkpoint['epoch']
 
 def uniform_kernel(kernel_size):
     kernel = np.ones((kernel_size, kernel_size), dtype=np.float32)
@@ -346,8 +324,83 @@ def inference(scene_idx):
 
         inference_one_view(rgb_file, depth_file, meta_file, scene_idx, anno_idx)
 
+def prepare_models(model='deeplabv3plus_resnet101', num_classes=2, output_stride=16, \
+                   checkpoint_path='/home/tidy/ur5_sh/ur5_experiment/suctionnet_baseline/kinect-deeplabplus-RGBD.pt'):
+    model_map = {
+            'deeplabv3_resnet50': network.deeplabv3_resnet50,
+            'deeplabv3plus_resnet50': network.deeplabv3plus_resnet50,
+            'deeplabv3_resnet101': network.deeplabv3_resnet101,
+            'deeplabv3plus_resnet101': network.deeplabv3plus_resnet101,
+            'deeplabv3_mobilenet': network.deeplabv3_mobilenet,
+            'deeplabv3plus_mobilenet': network.deeplabv3plus_mobilenet,
+            'convnet_resnet101': ConvNet.convnet_resnet101,
+            'deeplabv3plus_resnet101_depth': network.deeplabv3plus_resnet101_depth
+        }
+    
+    net = model_map[model](num_classes=num_classes, output_stride=output_stride)
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    net = nn.DataParallel(net)
+    checkpoint = torch.load(checkpoint_path)
+    net.load_state_dict(checkpoint['model_state_dict'])
+    net.to(device)
+    return net
+
+'''
+rgb : 0~1 rgb image for numpy
+depth: /1000.0 depth numpy
+'''
+def suction_for_experiment(camera_info, rgb, depth, net):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
+    rgb, depth = torch.from_numpy(rgb), torch.from_numpy(depth)
+    depth = torch.clamp(depth, 0, 1)
+    rgbd = torch.cat([rgb, depth.unsqueeze(-1)], dim=-1).unsqueeze(0)
+    rgbd = rgbd.permute(0, 3, 1, 2)
+    rgbd = rgbd.type(torch.float32)
+    rgbd = rgbd.to(device)
+
+    net.eval()
+    tic = time.time()
+    with torch.no_grad():
+        pred = net(rgbd)
+    pred = pred.clamp(0, 1)
+    toc = time.time()
+    print('inference time:', toc - tic)
+
+    heatmap = (pred[0, 0] * pred[0, 1]).cpu().unsqueeze(0).unsqueeze(0)
+    
+    k_size = 15
+    kernel = uniform_kernel(k_size)
+    kernel = torch.from_numpy(kernel).unsqueeze(0).unsqueeze(0)
+    heatmap = F.conv2d(heatmap, kernel, padding=(kernel.shape[2] // 2, kernel.shape[3] // 2)).squeeze().numpy()
+    heatmap_cv = cv2.applyColorMap((np.clip(heatmap, 0, 1) * 255).astype(np.uint8), cv2.COLORMAP_RAINBOW)
+    hh = (rgb.detach().cpu().numpy() * 255 * .5 + heatmap_cv * .5).astype(np.uint8)
+    cv2.imshow('d', hh)
+    cv2.waitKey(0)
+    suctions, idx0, idx1 = get_suction_from_heatmap(depth.numpy(), heatmap, camera_info)
+    print(suctions[0])
+    return suctions[:-1]
+
 if __name__ == "__main__":
     
+    model_map = {
+            'deeplabv3_resnet50': network.deeplabv3_resnet50,
+            'deeplabv3plus_resnet50': network.deeplabv3plus_resnet50,
+            'deeplabv3_resnet101': network.deeplabv3_resnet101,
+            'deeplabv3plus_resnet101': network.deeplabv3plus_resnet101,
+            'deeplabv3_mobilenet': network.deeplabv3_mobilenet,
+            'deeplabv3plus_mobilenet': network.deeplabv3plus_mobilenet,
+            'convnet_resnet101': ConvNet.convnet_resnet101,
+            'deeplabv3plus_resnet101_depth': network.deeplabv3plus_resnet101_depth
+        }
+    net = model_map[FLAGS.model](num_classes=FLAGS.num_classes, output_stride=FLAGS.output_stride)
+    if CHECKPOINT_PATH is not None and os.path.isfile(CHECKPOINT_PATH):
+        print('Loading model from:')
+        print(CHECKPOINT_PATH)
+        checkpoint = torch.load(CHECKPOINT_PATH)
+    net.load_state_dict(checkpoint['model_state_dict'])
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    net = nn.DataParallel(net)
+    net.to(device)
     scene_list = []
     if split == 'test':
         for i in range(100, 190):
