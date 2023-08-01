@@ -1,8 +1,4 @@
 from torch import nn
-<<<<<<< HEAD
-=======
-# from torchvision.models.utils import load_state_dict_from_url
->>>>>>> a7c428d4b799f16a049337618816e43ede1ff24f
 from torch.hub import load_state_dict_from_url
 import torch.nn.functional as F
 
