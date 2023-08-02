@@ -356,7 +356,7 @@ def prepare_models(model='deeplabv3plus_resnet101', num_classes=2, output_stride
 rgb : 0~1 rgb image for numpy
 depth: /1000.0 depth numpy
 '''
-def suction_for_experiment(camera_info, rgb, depth, net):
+def suction_for_experiment(camera_info, rgb, depth, net, cnt):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
     rgb, depth = torch.from_numpy(rgb), torch.from_numpy(depth)
     depth = torch.clamp(depth, 0, 1)
@@ -374,18 +374,21 @@ def suction_for_experiment(camera_info, rgb, depth, net):
     print('inference time:', toc - tic)
 
     heatmap = (pred[0, 0] * pred[0, 1]).cpu().unsqueeze(0).unsqueeze(0)
-    
+    print("got heatmap")
     k_size = 15
     kernel = uniform_kernel(k_size)
     kernel = torch.from_numpy(kernel).unsqueeze(0).unsqueeze(0)
     heatmap = F.conv2d(heatmap, kernel, padding=(kernel.shape[2] // 2, kernel.shape[3] // 2)).squeeze().numpy()
     heatmap_cv = cv2.applyColorMap((np.clip(heatmap, 0, 1) * 255).astype(np.uint8), cv2.COLORMAP_RAINBOW)
     hh = (rgb.detach().cpu().numpy() * 255 * .5 + heatmap_cv * .5).astype(np.uint8)
-    cv2.imshow('d', hh)
-    cv2.waitKey(0)
+    os.makedirs(f"figures/suctionnet/", exist_ok=True)
+    print("hh", hh.shape)
+    cv2.imwrite(f'/home/tidy/ur5_sh/ur5_experiment/figures/suctionnet/{cnt}.png', hh)
+    cv2.waitKey(10)
     suctions, idx0, idx1 = get_suction_from_heatmap(depth.numpy(), heatmap, camera_info)
-    print(suctions[0])
-    return suctions[:-1]
+    rpyxyz = suctions[np.argmax(suctions[:, 0]),1:]
+
+    return rpyxyz
 
 if __name__ == "__main__":
     
